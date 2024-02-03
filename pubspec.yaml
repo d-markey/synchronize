@@ -1,6 +1,6 @@
 name: synchronize
-description: This package provides synchronization implementations, including a Lock (with support for reentrancy), a ReaderWriterLock (with wupport for upgrades and downgrades), and a Semaphore.
-version: 1.0.1
+description: This package provides synchronization implementations, including a (reentrant) Lock, a (upgradable) ReaderWriterLock, and a Semaphore.
+version: 1.0.2
 repository: https://github.com/d-markey/Synchronize
 
 environment:
