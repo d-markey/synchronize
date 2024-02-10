@@ -3,18 +3,17 @@
 This package provides various synchronization implementations:
 
  * Lock for exclusive access
-   This lock can be used to execute critical sections of code.
-   The provided implementation supports reentrancy.
+   This lock can be used to execute critical sections of code. The provided implementation
+   supports reentrancy.
 
  * ReaderWriterLock for single writer/multiple reader synchronization
-   The provided implementation does not supports reentrancy, but locks
-   can be upgraded and/or downgraded.
+   The provided implementation does not supports reentrancy, but locks can be upgraded
+   and/or downgraded.
 
- * Semaphore for single writer/multiple reader synchronization
-   The provided implementation does not supports reentrancy, but locks
-   can be upgraded and/or downgraded.
+ * Semaphore for controlling access to resources.
 
-Implementations are based on package `using` and support automatic
+Implementations are based on package [`using`](https://pub.dev/packages/using) and support
+[cancelation tokens](https://pub.dev/packages/cancelation_token) as well as automatic
 releasing via `use()` / `useAsync()` / `execute()` / `executeAsync()`.
 
 ## Example

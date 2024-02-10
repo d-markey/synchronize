@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cancelation_token/cancelation_token.dart';
 import 'package:using/using.dart';
 
 import '_utils.dart';
@@ -39,46 +40,59 @@ import '_utils.dart';
 class ReaderWriterLock with Releasable {
   static final _locks = <Object, List<ReaderWriterLock>>{};
 
-  ReaderWriterLock._(this._target, this._mode, Duration? timeout) {
+  ReaderWriterLock._(this._target, this._mode, Duration? timeout, this._token) {
     track();
-    if (timeout != null) {
-      _timeout = Timer.periodic(timeout, (t) {
-        if (!_isAllowed) {
-          release();
-          _completer.done(null, TimeoutException('ReaderWriterLock timeout'));
-        }
-        t.cancel();
-      });
-    }
+    _timeout = (timeout == null)
+        ? null
+        : Timer.periodic(timeout, (t) {
+            if (!_isCompleted) {
+              release();
+              _completer.done(
+                  null, TimeoutException('ReaderWriterLock timeout'));
+            }
+            t.cancel();
+          });
+
+    _token?.onCanceled.then((ex) {
+      if (!_isCompleted) {
+        release();
+        _completer.done(null, ex);
+      }
+    });
   }
 
-  ReaderWriterLock._read(Object target, Duration? timeout)
-      : this._(target, _read, timeout);
+  ReaderWriterLock._read(
+      Object target, Duration? timeout, CancelationToken? token)
+      : this._(target, _read, timeout, token);
 
-  ReaderWriterLock._upgrade(Object target, Duration? timeout)
-      : this._(target, _upgrade, timeout);
+  ReaderWriterLock._upgrade(
+      Object target, Duration? timeout, CancelationToken? token)
+      : this._(target, _upgrade, timeout, token);
 
-  ReaderWriterLock._write(Object target, Duration? timeout)
-      : this._(target, _write, timeout);
+  ReaderWriterLock._write(
+      Object target, Duration? timeout, CancelationToken? token)
+      : this._(target, _write, timeout, token);
 
   int _mode;
   final Object _target;
   final _completer = Completer<ReaderWriterLock>();
-  Timer? _timeout;
+  late final Timer? _timeout;
+  final CancelationToken? _token;
 
   bool get isReader => _mode == _read;
   bool get isWriter => _mode == _write;
   bool get isUpgraded => _mode == _upgrade;
 
-  bool get _isAllowed => _completer.isCompleted;
+  bool get _isCompleted => _completer.isCompleted;
   Future<ReaderWriterLock> get _allowed => _completer.future;
 
   /// Obtain shared read access to [target]. If [target] is already locked for
   /// reading, access will be granted immediately. Otherwise, access will be
   /// granted after pending write/upgrade locks have been released. Instances
   /// returned by this method must be released by a call to [release].
-  static Future<ReaderWriterLock> read(Object target, {Duration? timeout}) {
-    final lock = ReaderWriterLock._read(target, timeout);
+  static Future<ReaderWriterLock> read(Object target,
+      {Duration? timeout, CancelationToken? cancelToken}) {
+    final lock = ReaderWriterLock._read(target, timeout, cancelToken);
     final requests = _locks.putIfAbsent(target, () => [])..add(lock);
     return lock._proceed(requests);
   }
@@ -90,7 +104,7 @@ class ReaderWriterLock with Releasable {
   static ReaderWriterLock? tryRead(Object target) {
     final requests = _locks.putIfAbsent(target, () => []);
     if (requests.isEmpty || requests.every((r) => r.isReader)) {
-      final lock = ReaderWriterLock._read(target, null);
+      final lock = ReaderWriterLock._read(target, null, null);
       requests.add(lock);
       lock._proceed(requests);
       return lock;
@@ -103,8 +117,9 @@ class ReaderWriterLock with Releasable {
   /// locked, access will be granted immediately. Otherwise, access will be
   /// granted after pending read/write/upgrade locks have been released.
   /// Instances returned by this method must be released by a call to [release].
-  static Future<ReaderWriterLock> write(Object target, {Duration? timeout}) {
-    final lock = ReaderWriterLock._write(target, timeout);
+  static Future<ReaderWriterLock> write(Object target,
+      {Duration? timeout, CancelationToken? cancelToken}) {
+    final lock = ReaderWriterLock._write(target, timeout, cancelToken);
     final requests = _locks.putIfAbsent(target, () => [])..add(lock);
     return lock._proceed(requests);
   }
@@ -115,7 +130,7 @@ class ReaderWriterLock with Releasable {
   static ReaderWriterLock? tryWrite(Object target) {
     final requests = _locks.putIfAbsent(target, () => []);
     if (requests.isEmpty) {
-      final lock = ReaderWriterLock._read(target, null);
+      final lock = ReaderWriterLock._read(target, null, null);
       requests.add(lock);
       lock._proceed(requests);
       return lock;
@@ -129,10 +144,11 @@ class ReaderWriterLock with Releasable {
   /// have been released. If the current lock already has exclusive write
   /// access, it will be granted immediate access. Instances returned by this
   /// method must be released by a call to [release].
-  Future<ReaderWriterLock> upgrade({Duration? timeout}) {
+  Future<ReaderWriterLock> upgrade(
+      {Duration? timeout, CancelationToken? cancelToken}) {
     // prepare upgrade lock [U*] that will be inserted in the list of lock
     // requests
-    final upgrade = ReaderWriterLock._upgrade(_target, timeout);
+    final upgrade = ReaderWriterLock._upgrade(_target, timeout, cancelToken);
     final requests = _locks[_target]!;
 
     if (requests.first.isReader) {
@@ -229,7 +245,7 @@ class ReaderWriterLock with Releasable {
       assert(isReader);
 
       if (requests.length == 1 || requests[1].isWriter) {
-        upgrade = ReaderWriterLock._upgrade(_target, null);
+        upgrade = ReaderWriterLock._upgrade(_target, null, null);
         requests.insert(0, upgrade);
       }
 
@@ -240,7 +256,7 @@ class ReaderWriterLock with Releasable {
       //              or [U] ...
 
       // grant immediate access
-      upgrade = ReaderWriterLock._upgrade(_target, null);
+      upgrade = ReaderWriterLock._upgrade(_target, null, null);
       requests.insert(0, upgrade);
 
       // final state   = [U*] [W] ...
@@ -314,7 +330,9 @@ class ReaderWriterLock with Releasable {
 
   void _allow() {
     _timeout?.cancel();
-    _completer.done(this);
+    if (!_isCompleted && !(_token?.isCanceled ?? false)) {
+      _completer.done(this);
+    }
   }
 
   Stats getStats() {
@@ -341,7 +359,7 @@ class ReaderWriterLock with Releasable {
   }
 
   String toShortString() =>
-      '${String.fromCharCode(_mode)}${_isAllowed ? '' : '/'}';
+      '${String.fromCharCode(_mode)}${_isCompleted ? '' : '/'}';
 
   // String _dump(String label, List<ReaderWriterLock> requests) => requests
   //         .isEmpty

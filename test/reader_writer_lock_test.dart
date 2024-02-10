@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cancelation_token/cancelation_token.dart';
 import 'package:synchronize/synchronize.dart';
 import 'package:test/test.dart';
 import 'package:using/using.dart';
@@ -67,7 +68,7 @@ void main() {
           expect(res2.error, isNull);
 
           final stats1 = (res1.value as ReaderWriterLock).getStats();
-          final stats2 = (res1.value as ReaderWriterLock).getStats();
+          final stats2 = (res2.value as ReaderWriterLock).getStats();
 
           expect(stats1.readers, equals(2));
           expect(stats1.writers, isZero);
@@ -76,6 +77,48 @@ void main() {
           expect(stats1.readers, equals(stats2.readers));
           expect(stats1.writers, equals(stats2.writers));
           expect(stats1.upgraded, equals(stats2.upgraded));
+        } finally {
+          res1.value?.release();
+          res2.value?.release();
+        }
+      });
+
+      test('with cancel token', () async {
+        final token = CancelableToken();
+        final future1 =
+            ReaderWriterLock.read(sharedResource, cancelToken: token);
+        final res1 = checkFuture(future1);
+
+        token.cancel();
+
+        final future2 =
+            ReaderWriterLock.read(sharedResource, cancelToken: token);
+        final res2 = checkFuture(future2);
+
+        try {
+          expect(res1.isReady, isFalse);
+          expect(res1.value, isNull);
+          expect(res1.error, isNull);
+
+          expect(res2.isReady, isFalse);
+          expect(res2.value, isNull);
+          expect(res2.error, isNull);
+
+          await Future.delayed(Duration.zero);
+
+          expect(res1.isReady, isTrue);
+          expect(res1.value, isA<ReaderWriterLock>());
+          expect(res1.error, isNull);
+
+          expect(res2.isReady, isTrue);
+          expect(res2.value, isNull);
+          expect(res2.error, isA<CanceledException>());
+
+          final stats1 = (res1.value as ReaderWriterLock).getStats();
+
+          expect(stats1.readers, equals(1));
+          expect(stats1.writers, isZero);
+          expect(stats1.upgraded, isZero);
         } finally {
           res1.value?.release();
           res2.value?.release();
