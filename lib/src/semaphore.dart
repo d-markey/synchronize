@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cancelation_token/cancelation_token.dart';
+import 'package:synchronize/src/releasable_token.dart';
 
 import '_utils.dart';
 import 'exceptions.dart';
@@ -28,7 +29,7 @@ class Semaphore {
   /// requested but are not yet available).
   int get pendingCount => _completers.length;
 
-  final _completers = <Completer<bool>>[];
+  final _completers = <Completer<ReleasableToken>>[];
 
   /// Increment [currentCount] by [count] and allow pending requests to enter
   /// the semaphore. If [maxCount] was provided and [currentCount] + [count]
@@ -46,7 +47,7 @@ class Semaphore {
     // allow pending requests
     while (_currentAvailableCount > 0 && _completers.isNotEmpty) {
       final completer = _completers.removeAt(0);
-      completer.done(true);
+      completer.done(_SemaphoreToken(this));
       _currentAvailableCount -= 1;
     }
   }
@@ -54,22 +55,23 @@ class Semaphore {
   /// Alias for [signal] with `count = 1`.
   void leave() => signal(1);
 
-  /// If [currentCount] is positive, decrement the counter and returns `true`.
+  /// If [currentCount] is positive, decrements the counter and returns a
+  /// releasable token that may be used for leaving the semaphore.
   /// Otherwise, returns a future that will complete after [signal] is
   /// eventually called to free a resource. If a [timeout] is provided and the
-  /// timeout expires, a [TimeoutException] will be thrown.
-  FutureOr<bool> enter(
+  /// timeout expires, throws a [TimeoutException].
+  FutureOr<ReleasableToken> enter(
       {Duration? timeout, CancelationToken? cancelationToken}) {
     cancelationToken?.throwIfCanceled();
 
     // sync route
     if (_currentAvailableCount > 0) {
       _currentAvailableCount--;
-      return true;
+      return _SemaphoreToken(this);
     }
 
     // async route
-    final completer = Completer<bool>();
+    final completer = Completer<ReleasableToken>();
     _completers.add(completer);
 
     if (timeout != null) {
@@ -90,14 +92,27 @@ class Semaphore {
     return completer.future;
   }
 
-  /// If [currentCount] is positive, decrement the counter and returns `true`,
-  /// otherwise, returns `false`.
-  bool tryEnter() {
+  /// If [currentCount] is positive, decrements the counter and returns a
+  /// releasable token that may be used for leaving the semaphore. Otherwise,
+  /// returns `null`.
+  ReleasableToken? tryEnter() {
     if (_currentAvailableCount > 0) {
       _currentAvailableCount--;
-      return true;
+      return _SemaphoreToken(this);
     } else {
-      return false;
+      return null;
     }
+  }
+}
+
+class _SemaphoreToken extends ReleasableToken {
+  _SemaphoreToken(this._semaphore);
+
+  final Semaphore _semaphore;
+
+  @override
+  void release() {
+    _semaphore.leave();
+    super.release();
   }
 }

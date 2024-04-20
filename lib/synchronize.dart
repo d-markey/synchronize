@@ -51,3 +51,4 @@ export 'src/exceptions.dart';
 export 'src/lock.dart';
 export 'src/reader_writer_lock.dart';
 export 'src/semaphore.dart';
+export 'src/releasable_token.dart';
