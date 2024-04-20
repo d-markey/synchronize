@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cancelation_token/cancelation_token.dart';
 import 'package:synchronize/synchronize.dart';
 import 'package:test/test.dart';
+import 'package:using/using.dart';
 
 import 'utils.dart';
 
@@ -12,13 +13,13 @@ void main() {
       test('initialCount = 2', () {
         final semaphore = Semaphore(2);
         expect(semaphore.currentCount, equals(2));
-        expect(semaphore.enter(), isTrue);
+        expect(semaphore.enter(), isA<ReleasableToken>());
         expect(semaphore.currentCount, equals(1));
         expect(semaphore.pendingCount, isZero);
-        expect(semaphore.enter(), isTrue);
+        expect(semaphore.enter(), isA<ReleasableToken>());
         expect(semaphore.currentCount, isZero);
         expect(semaphore.pendingCount, isZero);
-        expect(semaphore.enter(), isA<Future<bool>>());
+        expect(semaphore.enter(), isA<Future<ReleasableToken>>());
         expect(semaphore.currentCount, isZero);
         expect(semaphore.pendingCount, equals(1));
       });
@@ -26,7 +27,7 @@ void main() {
       test('initialCount = 0', () {
         final semaphore = Semaphore(0);
         expect(semaphore.currentCount, isZero);
-        expect(semaphore.enter(), isA<Future<bool>>());
+        expect(semaphore.enter(), isA<Future<ReleasableToken>>());
         expect(semaphore.currentCount, isZero);
         expect(semaphore.pendingCount, equals(1));
       });
@@ -35,7 +36,7 @@ void main() {
         final semaphore = Semaphore(0);
         expect(semaphore.currentCount, isZero);
         final enter = semaphore.enter(timeout: timeout);
-        expect(enter, isA<Future<bool>>());
+        expect(enter, isA<Future<ReleasableToken>>());
         expect(semaphore.currentCount, isZero);
         expect(semaphore.pendingCount, equals(1));
 
@@ -73,7 +74,7 @@ void main() {
         final semaphore = Semaphore(0);
         expect(semaphore.currentCount, isZero);
         final enter = semaphore.enter(timeout: timeout);
-        expect(enter, isA<Future<bool>>());
+        expect(enter, isA<Future<ReleasableToken>>());
         expect(semaphore.currentCount, isZero);
         expect(semaphore.pendingCount, equals(1));
 
@@ -98,7 +99,7 @@ void main() {
         }
         expect(res.value, isNotNull);
         expect(res.error, isNull);
-        expect(res.value, isTrue);
+        expect(res.value, isA<ReleasableToken>());
       });
 
       test('initialCount = 0, with canceled token', () async {
@@ -133,7 +134,7 @@ void main() {
 
         await Future.delayed(Duration.zero);
         expect(res.isReady, isTrue);
-        expect(res.value, isTrue);
+        expect(res.value, isA<ReleasableToken>());
         expect(res.error, isNull);
 
         token.cancel();
@@ -169,6 +170,17 @@ void main() {
         expect(semaphore.currentCount, equals(1));
         expect(semaphore.pendingCount, isZero);
       });
+
+      test('releasable token', () async {
+        final semaphore = Semaphore(2);
+        var done = false;
+        await semaphore.enter().use((_) {
+          expect(semaphore.currentCount, equals(1));
+          done = true;
+        });
+        expect(done, isTrue);
+        expect(semaphore.currentCount, equals(2));
+      });
     });
 
     group('tryEnter', () {
@@ -176,12 +188,23 @@ void main() {
         final semaphore = Semaphore(2, maxCount: 3);
 
         expect(semaphore.currentCount, equals(2));
-        expect(semaphore.tryEnter(), isTrue);
+        expect(semaphore.tryEnter(), isA<ReleasableToken>());
         expect(semaphore.currentCount, equals(1));
-        expect(semaphore.tryEnter(), isTrue);
+        expect(semaphore.tryEnter(), isA<ReleasableToken>());
         expect(semaphore.currentCount, isZero);
-        expect(semaphore.tryEnter(), isFalse);
+        expect(semaphore.tryEnter(), isNull);
         expect(semaphore.currentCount, isZero);
+      });
+
+      test('releasable token', () async {
+        final semaphore = Semaphore(2);
+        var done = false;
+        semaphore.tryEnter()?.use((_) {
+          expect(semaphore.currentCount, equals(1));
+          done = true;
+        });
+        expect(done, isTrue);
+        expect(semaphore.currentCount, equals(2));
       });
     });
 
@@ -235,8 +258,8 @@ void main() {
       test('initialCount = 0, no max count, 2x enter()) + signal(2)', () async {
         final semaphore = Semaphore(0);
         expect(semaphore.currentCount, isZero);
-        final future1 = semaphore.enter() as Future<bool>;
-        final future2 = semaphore.enter() as Future<bool>;
+        final future1 = semaphore.enter() as Future<ReleasableToken>;
+        final future2 = semaphore.enter() as Future<ReleasableToken>;
         expect(semaphore.currentCount, isZero);
         expect(semaphore.pendingCount, equals(2));
 
@@ -265,10 +288,10 @@ void main() {
         await Future.delayed(smallDelay);
 
         expect(res1.isReady, isTrue);
-        expect(res1.value, isTrue);
+        expect(res1.value, isA<ReleasableToken>());
         expect(res1.error, isNull);
         expect(res2.isReady, isTrue);
-        expect(res2.value, isTrue);
+        expect(res2.value, isA<ReleasableToken>());
         expect(res2.error, isNull);
         expect(semaphore.currentCount, isZero);
         expect(semaphore.pendingCount, isZero);
